@@ -6,7 +6,6 @@ các logic kiểm tra ràng buộc của Flight Agent
 from flight_agent.models import Flight, FlightConstraints
 
 
-# TEST 1: Chuyến bay hợp lệ phải thỏa mãn toàn bộ ràng buộc
 def test_flight_satisfies_all_constraints():
     constraints = FlightConstraints(
         origin="SGN",
@@ -27,7 +26,6 @@ def test_flight_satisfies_all_constraints():
     assert constraints.is_satisfied_by(flight)
 
 
-# TEST 2: Chuyến bay vượt quá giá tối đa phải bị từ chối
 def test_flight_exceeds_max_price():
     constraints = FlightConstraints(
         origin="SGN",
@@ -48,7 +46,6 @@ def test_flight_exceeds_max_price():
     assert not constraints.is_satisfied_by(flight)
 
 
-# TEST 3: Chuyến bay khởi hành sau thời gian cho phép phải bị từ chối
 def test_flight_departs_too_late():
     constraints = FlightConstraints(
         origin="SGN",
@@ -69,7 +66,6 @@ def test_flight_departs_too_late():
     assert not constraints.is_satisfied_by(flight)
 
 
-# TEST 4: Chuyến bay sai tuyến yêu cầu phải bị từ chối
 def test_flight_has_wrong_route():
     constraints = FlightConstraints(
         origin="SGN",
