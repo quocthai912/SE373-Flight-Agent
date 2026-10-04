@@ -5,11 +5,19 @@
 import pytest
 
 from langchain_core.messages import AIMessage
+from langchain_core.runnables import RunnableLambda
 
 from flight_agent.harness import AgentPermissions, FlightAgentHarness
 from flight_agent.models import FlightConstraints
 from flight_agent.react_agent import ReActFlightAgent
-from flight_agent.tools import reset_booking_store
+from flight_agent.plan_execute_agent import (
+    FlightPlan,
+    PlanStep,
+    PlanThenExecuteFlightAgent,
+)
+from flight_agent.tools import reset_booking_store, get_booking
+
+"""ReAct Flight Agent"""
 
 
 class ScriptedModel:
@@ -45,6 +53,52 @@ def tool_call_message(
                 "type": "tool_call",
             }
         ],
+    )
+
+
+"""Plan Then Execute Flight Agent"""
+
+
+class ScriptedPlannerModel:
+    """Khởi tạo Model lập kế hoạch giả lập."""
+
+    def __init__(self, plan: FlightPlan):
+        self.plan = plan
+        self.invoke_count = 0
+
+    def with_structured_output(self, schema):
+        self.schema = schema
+
+        return RunnableLambda(self._invoke)
+
+    def _invoke(self, _):
+        self.invoke_count += 1
+        return self.plan
+
+
+def valid_flight_plan() -> FlightPlan:
+    """Tạo kế hoạch đặt vé hợp lệ dùng cho kiểm thử Plan-Then-Execute Flight Agent."""
+    return FlightPlan(
+        steps=[
+            PlanStep(
+                tool="book_seat",
+                args={
+                    "flight_number": "VN122",
+                },
+            ),
+            PlanStep(
+                tool="pay",
+                args={
+                    "booking_code": "$booking_code",
+                },
+            ),
+            PlanStep(
+                tool="get_booking",
+                args={
+                    "booking_code": "$booking_code",
+                },
+            ),
+        ]
     )
 
 
@@ -262,3 +316,150 @@ def test_react_agent_stops_at_max_steps(constraints):
     assert (
         result["handoff"]["reason"] == "The maximum number of ReAct steps was reached."
     )
+
+
+def test_plan_execute_agent_creates_plan_before_execution(
+    constraints,
+):
+    model = ScriptedPlannerModel(valid_flight_plan())
+
+    harness = FlightAgentHarness(
+        constraints=constraints,
+        permissions=AgentPermissions(
+            allow_booking=True,
+            allow_payment=True,
+        ),
+    )
+
+    agent = PlanThenExecuteFlightAgent(
+        model=model,
+        harness=harness,
+    )
+
+    plan, search_result = agent.create_plan()
+
+    assert model.invoke_count == 1
+
+    assert [step.tool for step in plan.steps] == [
+        "book_seat",
+        "pay",
+        "get_booking",
+    ]
+
+    assert search_result["status"] == "success"
+
+    assert get_booking("VN122-1")["status"] == "not_found"
+
+
+def test_plan_execute_agent_completes_booking(
+    constraints,
+):
+    model = ScriptedPlannerModel(valid_flight_plan())
+
+    harness = FlightAgentHarness(
+        constraints=constraints,
+        permissions=AgentPermissions(
+            allow_booking=True,
+            allow_payment=True,
+        ),
+    )
+
+    agent = PlanThenExecuteFlightAgent(
+        model=model,
+        harness=harness,
+    )
+
+    result = agent.run()
+
+    assert result["status"] == "complete"
+    assert result["booking"]["code"] == "VN122-1"
+    assert result["booking"]["paid"] is True
+
+    assert model.invoke_count == 1
+
+    assert [item["action"] for item in result["trace"]] == [
+        "book_seat",
+        "pay",
+        "get_booking",
+    ]
+
+
+def test_plan_execute_agent_stops_when_payment_is_denied(
+    constraints,
+):
+    model = ScriptedPlannerModel(valid_flight_plan())
+
+    harness = FlightAgentHarness(
+        constraints=constraints,
+        permissions=AgentPermissions(
+            allow_booking=True,
+            allow_payment=False,
+        ),
+    )
+
+    agent = PlanThenExecuteFlightAgent(
+        model=model,
+        harness=harness,
+    )
+
+    result = agent.run()
+
+    assert result["status"] == "handoff"
+
+    assert result["handoff"]["booking"]["code"] == ("VN122-1")
+
+    assert result["handoff"]["booking"]["paid"] is False
+
+    assert [item["action"] for item in result["trace"]] == [
+        "book_seat",
+        "pay",
+    ]
+
+
+def test_plan_execute_agent_rejects_invalid_plan(
+    constraints,
+):
+    invalid_plan = FlightPlan(
+        steps=[
+            PlanStep(
+                tool="pay",
+                args={
+                    "booking_code": "$booking_code",
+                },
+            ),
+            PlanStep(
+                tool="book_seat",
+                args={
+                    "flight_number": "VN122",
+                },
+            ),
+            PlanStep(
+                tool="get_booking",
+                args={
+                    "booking_code": "$booking_code",
+                },
+            ),
+        ]
+    )
+
+    model = ScriptedPlannerModel(invalid_plan)
+
+    harness = FlightAgentHarness(
+        constraints=constraints,
+        permissions=AgentPermissions(
+            allow_booking=True,
+            allow_payment=True,
+        ),
+    )
+
+    agent = PlanThenExecuteFlightAgent(
+        model=model,
+        harness=harness,
+    )
+
+    result = agent.run()
+
+    assert result["status"] == "invalid_plan"
+    assert result["trace"] == []
+
+    assert get_booking("VN122-1")["status"] == "not_found"
