@@ -12,15 +12,31 @@ from dotenv import load_dotenv
 class AppConfig:
     """Cấu hình dùng chung của ứng dụng."""
 
-    api_key: str | None
-    model_name: str | None
+    api_key: str
+    model_name: str
 
 
 def load_config() -> AppConfig:
     """Đọc cấu hình từ biến môi trường."""
     load_dotenv()
 
+    api_key = os.getenv("API_KEY")
+    model_name = os.getenv("FLIGHT_AGENT_MODEL")
+
+    missing = []
+
+    if not api_key:
+        missing.append("API_KEY")
+
+    if not model_name:
+        missing.append("FLIGHT_AGENT_MODEL")
+
+    if missing:
+        raise ValueError(
+            "Missing required environment variables: " + ", ".join(missing)
+        )
+
     return AppConfig(
-        api_key=os.getenv("API_KEY"),
-        model_name=os.getenv("FLIGHT_AGENT_MODEL"),
+        api_key=api_key,
+        model_name=model_name,
     )
