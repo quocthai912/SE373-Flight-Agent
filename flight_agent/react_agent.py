@@ -14,6 +14,10 @@ from langchain_core.tools import StructuredTool
 
 from flight_agent.harness import FlightAgentHarness
 from flight_agent.tools import get_booking, search_flights
+from flight_agent.failure_modes import (
+    LoopDetector,
+    validate_tool_result,
+)
 
 
 class ReActFlightAgent:
@@ -24,12 +28,17 @@ class ReActFlightAgent:
         model: BaseChatModel,
         harness: FlightAgentHarness,
         max_steps: int = 7,
+        loop_repeat_limit: int = 3,
     ):
         if max_steps <= 0:
             raise ValueError("max_steps must be greater than zero.")
 
+        if loop_repeat_limit < 2:
+            raise ValueError("loop_repeat_limit must be at least two.")
+
         self.harness = harness
         self.max_steps = max_steps
+        self.loop_repeat_limit = loop_repeat_limit
 
         self.tools = self._build_tools()
         self.tools_by_name = {tool.name: tool for tool in self.tools}
@@ -117,7 +126,8 @@ class ReActFlightAgent:
             }
 
         try:
-            return tool.invoke(tool_args)
+            result = tool.invoke(tool_args)
+            return validate_tool_result(tool_name, result)
 
         except Exception as exc:
             return {
@@ -136,6 +146,8 @@ class ReActFlightAgent:
         side_effects = []
 
         booking_code = None
+
+        loop_detector = LoopDetector(repeat_limit=self.loop_repeat_limit)
 
         for step in range(1, self.max_steps + 1):
             response_model = self.model.invoke(messages)
@@ -169,6 +181,42 @@ class ReActFlightAgent:
             tool_call = tool_calls[0]
             tool_name = tool_call["name"]
             tool_args = tool_call["args"]
+
+            if tool_name != "get_booking" and loop_detector.check(tool_name, tool_args):
+                observation = {
+                    "status": "loop_detected",
+                    "message": "The same tool call was repeated too many times.",
+                    "tool": tool_name,
+                }
+
+                trace.append(
+                    {
+                        "step": step,
+                        "action": tool_name,
+                        "args": tool_args,
+                        "observation": observation,
+                    }
+                )
+
+                attempted_actions.append(
+                    f"Blocked repeated call to {tool_name} with {json.dumps(tool_args, sort_keys=True)}."
+                )
+
+                handoff = self.harness.create_handoff(
+                    reason=f"Repeated tool call detected at ReAct step {step}.",
+                    attempted_actions=attempted_actions,
+                    side_effects=side_effects,
+                    question="Would you like to review the repeated actions?",
+                    booking_code=booking_code,
+                )
+
+                return {
+                    "status": "loop_detected",
+                    "message": self.harness.format_handoff(handoff),
+                    "failure_step": step,
+                    "handoff": handoff,
+                    "trace": trace,
+                }
 
             observation = self._execute_tool(
                 tool_name=tool_name,
