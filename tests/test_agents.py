@@ -15,6 +15,7 @@ from flight_agent.plan_execute_agent import (
     PlanStep,
     PlanThenExecuteFlightAgent,
 )
+from flight_agent.hybrid_agent import HybridFlightAgent
 from flight_agent.tools import reset_booking_store, get_booking
 
 """ReAct Flight Agent"""
@@ -84,6 +85,56 @@ def valid_flight_plan() -> FlightPlan:
                 tool="book_seat",
                 args={
                     "flight_number": "VN122",
+                },
+            ),
+            PlanStep(
+                tool="pay",
+                args={
+                    "booking_code": "$booking_code",
+                },
+            ),
+            PlanStep(
+                tool="get_booking",
+                args={
+                    "booking_code": "$booking_code",
+                },
+            ),
+        ]
+    )
+
+
+"""Hybrid Flight Agent"""
+
+
+class ScriptedHybridPlannerModel:
+    """Khởi tạo Model giả lập bằng chuỗi kế hoạch đã xác định trước."""
+
+    def __init__(self, plans: list[FlightPlan]):
+        self.plans = plans
+        self.index = 0
+        self.invoke_count = 0
+
+    def with_structured_output(self, schema):
+        self.schema = schema
+        return RunnableLambda(self._invoke)
+
+    def _invoke(self, _):
+        plan = self.plans[self.index]
+        self.index += 1
+        self.invoke_count += 1
+        return plan
+
+
+def flight_plan_for(
+    flight_number: str,
+) -> FlightPlan:
+    """Tạo kế hoạch đặt vé hợp lệ dùng cho kiểm thử Hybrid Flight Agent."""
+    return FlightPlan(
+        steps=[
+            PlanStep(
+                tool="book_seat",
+                args={
+                    "flight_number": flight_number,
                 },
             ),
             PlanStep(
@@ -463,3 +514,153 @@ def test_plan_execute_agent_rejects_invalid_plan(
     assert result["trace"] == []
 
     assert get_booking("VN122-1")["status"] == "not_found"
+
+
+def test_hybrid_agent_completes_without_replan(
+    constraints,
+):
+    model = ScriptedHybridPlannerModel(
+        plans=[
+            flight_plan_for("VN122"),
+        ]
+    )
+
+    harness = FlightAgentHarness(
+        constraints=constraints,
+        permissions=AgentPermissions(
+            allow_booking=True,
+            allow_payment=True,
+        ),
+    )
+
+    agent = HybridFlightAgent(
+        model=model,
+        harness=harness,
+        max_replans=2,
+    )
+
+    result = agent.run()
+
+    assert result["status"] == "complete"
+    assert result["booking"]["code"] == "VN122-1"
+    assert result["booking"]["paid"] is True
+
+    assert model.invoke_count == 1
+    assert result["replan_count"] == 0
+    assert len(result["plan_history"]) == 1
+
+
+def test_hybrid_agent_replans_after_constraint_violation(
+    constraints,
+):
+    model = ScriptedHybridPlannerModel(
+        plans=[
+            flight_plan_for("VJ604"),
+            flight_plan_for("VN122"),
+        ]
+    )
+
+    harness = FlightAgentHarness(
+        constraints=constraints,
+        permissions=AgentPermissions(
+            allow_booking=True,
+            allow_payment=True,
+        ),
+    )
+
+    agent = HybridFlightAgent(
+        model=model,
+        harness=harness,
+        max_replans=2,
+    )
+
+    result = agent.run()
+
+    assert result["status"] == "complete"
+
+    assert model.invoke_count == 2
+    assert result["replan_count"] == 1
+    assert len(result["plan_history"]) == 2
+
+    assert result["trace"][0]["observation"]["status"] == "constraint_violation"
+
+    assert [item["action"] for item in result["trace"]] == [
+        "book_seat",
+        "book_seat",
+        "pay",
+        "get_booking",
+    ]
+
+    assert result["booking"]["flight"]["flight_number"] == ("VN122")
+
+
+def test_hybrid_agent_handoffs_when_booking_is_denied(
+    constraints,
+):
+    model = ScriptedHybridPlannerModel(
+        plans=[
+            flight_plan_for("VN122"),
+        ]
+    )
+
+    harness = FlightAgentHarness(
+        constraints=constraints,
+        permissions=AgentPermissions(
+            allow_booking=False,
+            allow_payment=True,
+        ),
+    )
+
+    agent = HybridFlightAgent(
+        model=model,
+        harness=harness,
+        max_replans=2,
+    )
+
+    result = agent.run()
+
+    assert result["status"] == "handoff"
+
+    assert model.invoke_count == 1
+    assert result["replan_count"] == 0
+    assert len(result["trace"]) == 1
+
+    assert result["trace"][0]["observation"]["status"] == "denied"
+
+
+def test_hybrid_agent_stops_at_max_replans(
+    constraints,
+):
+    model = ScriptedHybridPlannerModel(
+        plans=[
+            flight_plan_for("VJ604"),
+            flight_plan_for("QH118"),
+        ]
+    )
+
+    harness = FlightAgentHarness(
+        constraints=constraints,
+        permissions=AgentPermissions(
+            allow_booking=True,
+            allow_payment=True,
+        ),
+    )
+
+    agent = HybridFlightAgent(
+        model=model,
+        harness=harness,
+        max_replans=1,
+    )
+
+    result = agent.run()
+
+    assert result["status"] == "max_replans_exceeded"
+
+    assert model.invoke_count == 2
+    assert result["replan_count"] == 1
+    assert len(result["plan_history"]) == 2
+
+    assert [item["observation"]["status"] for item in result["trace"]] == [
+        "constraint_violation",
+        "constraint_violation",
+    ]
