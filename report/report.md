@@ -24,9 +24,9 @@ Theo nội dung Buổi 3 - Agent Fundamentals, bài tập yêu cầu các phần
 - Cài đặt đầy đủ ba Pattern: ReAct, Plan-then-Execute và Hybrid.
 - Đánh giá hiệu quả của cả ba Pattern.
 
-Trong bài làm này, em chọn bài toán cụ thể là đặt một vé từ **SGN đến DAD ngày 07/10/2026, khởi hành trước 12:00 và giá không vượt quá 2.000.000 VNĐ**. Mục tiêu không phải mô phỏng toàn bộ hệ thống đặt vé thực tế, mà là tạo một môi trường nhỏ, có thể kiểm soát và có đủ trường hợp đúng/sai để quan sát cách từng Pattern hoạt động.
+Trong bài làm này, bài toán cụ thể được chọn là đặt một vé từ **SGN đến DAD ngày 07/10/2026, khởi hành trước 12:00 và giá không vượt quá 2.000.000 VNĐ**. Mục tiêu không phải mô phỏng toàn bộ hệ thống đặt vé thực tế, mà là tạo một môi trường nhỏ, có thể kiểm soát và có đủ trường hợp đúng/sai để quan sát cách từng Pattern hoạt động.
 
-Điểm em tập trung nhiều nhất là tách rõ vai trò của Model và Harness. Model có thể đề xuất hành động hoặc kế hoạch, nhưng các thao tác tạo Side Effect như đặt ghế và thanh toán phải được code kiểm tra lại trước khi thực hiện.
+Điểm cốt lõi của hệ thống là tách rõ vai trò của Model và Harness. Model có thể đề xuất hành động hoặc kế hoạch, nhưng các thao tác tạo Side Effect như đặt ghế và thanh toán phải được code kiểm tra lại trước khi thực hiện.
 
 ---
 
@@ -89,7 +89,7 @@ Thiết kế chính của bài có thể tóm tắt bằng ý:
 
 > **Model đề xuất, Harness xác minh, Tool thực thi, State thật quyết định Completion.**
 
-Em không tách ba Pattern thành ba project riêng. Cả ba đều dùng chung phần nghiệp vụ, dữ liệu và khung kiểm soát.
+Về mặt kiến trúc hệ thống, cả ba Pattern đều được triển khai trong cùng 1 project và được dùng chung toàn bộ các phần nghiệp vụ, dữ liệu và harness.
 
 ```mermaid
 flowchart TD
@@ -156,7 +156,7 @@ FLIGHT_AGENT/
 
 ### 3.3. LangChain và LangGraph trong bài làm
 
-Bài tập yêu cầu tìm hiểu cả LangChain và LangGraph. Trong phần cài đặt hiện tại, em sử dụng trực tiếp các thành phần của LangChain như:
+Bài tập yêu cầu tìm hiểu cả LangChain và LangGraph. Trong phần cài đặt hiện tại, hệ thống sử dụng trực tiếp các thành phần của LangChain như:
 
 - `BaseChatModel`.
 - `StructuredTool`.
@@ -165,7 +165,7 @@ Bài tập yêu cầu tìm hiểu cả LangChain và LangGraph. Trong phần cà
 - `With_structured_output(...)`.
 - Tích hợp Google Gemini qua `langchain-google-genai`.
 
-LangGraph đã được tìm hiểu trong phạm vi yêu cầu môn học, tuy nhiên **code hiện tại không dùng LangGraph để điều phối ba Pattern**. Em chủ động giữ vòng lặp bằng Python để có thể nhìn rõ từng bước, điều kiện dừng, Trace, Handoff và khác biệt giữa ba Pattern.
+LangGraph đã được tìm hiểu trong phạm vi yêu cầu môn học, tuy nhiên **code hiện tại không dùng LangGraph để điều phối ba Pattern**. Trong quá trình thiết kế, Agent Loop được chủ động triển khai trực tiếp bằng Python để có thể dễ dàng quan sát từng bước xử lý, điều kiện dừng, Trace, Handoff và sự khác biệt giữa ba Pattern.
 
 ---
 
@@ -752,7 +752,7 @@ Tuy nhiên, `success=False` ở Scenario này **không có nghĩa Agent xử lý
 - Cần thêm `plan_history`, `plan_number`, `replan_count` để Debug.
 - Phải thiết kế Replan Policy cẩn thận để tránh tạo Side Effect lặp.
 
-Với dữ liệu Evaluation hiện tại, em không kết luận có một Pattern tốt nhất cho mọi trường hợp. ReAct và Hybrid cho khả năng thích nghi tốt hơn trong Scenario có lỗi phục hồi được, trong khi Plan-then-Execute có ưu điểm rõ về số lần gọi Model và khả năng nhìn trước kế hoạch.
+Với dữ liệu Evaluation hiện tại, hệ thống không được sử dụng để kết luận có một Pattern tốt nhất cho mọi trường hợp. ReAct và Hybrid cho khả năng thích nghi tốt hơn trong Scenario có lỗi phục hồi được, trong khi Plan-then-Execute có ưu điểm rõ về số lần gọi Model và khả năng nhìn trước kế hoạch.
 
 ---
 
@@ -915,6 +915,6 @@ LangGraph có trong phạm vi tìm hiểu của bài, nhưng implementation hi�
 
 ## 13. Tổng kết
 
-Qua BTVN #3, em đã xây dựng một Flight Agent đặt vé bằng LangChain với Mock Tool, Harness và ba Pattern gồm ReAct, Plan-then-Execute và Hybrid. Hệ thống có các cơ chế kiểm tra Constraints, Permission, Completion Criteria, Handoff, Trace và một số Failure Mode cơ bản.
+Qua BTVN #3, bài làm đã xây dựng nên một hệ thống Flight Agent đặt vé bằng LangChain với Mock Tool, Harness và ba Pattern gồm ReAct, Plan-then-Execute và Hybrid. Hệ thống có các cơ chế kiểm tra Constraints, Permission, Completion Criteria, Handoff, Trace và một số Failure Mode cơ bản.
 
 Ba Pattern được đánh giá trên cùng các Scenario để so sánh cách hoạt động. ReAct và Hybrid có khả năng thích nghi tốt hơn khi gặp lỗi có thể phục hồi, trong khi Plan-then-Execute có số lần gọi Model thấp hơn. Cả ba Pattern đã chạy thành công với Google Gemini trong phần Demo, và toàn bộ 51 Test kiểm thử toàn hệ thống với Scripted Model hiện tại đều pass.
